@@ -1,9 +1,11 @@
 #[derive(thiserror::Error, Debug)]
 pub enum AutoConError {
-    #[error("Win32 Error")]
+    #[error("{0} (Win32 Error): {1}")]
     Win32Error(&'static str, std::io::Error),
     #[error("Timeout")]
     Timeout,
+    #[error("User defined error: {0}")]
+    UserDefinedError(String),
 }
 
 pub type Result<T> = std::result::Result<T, AutoConError>;
