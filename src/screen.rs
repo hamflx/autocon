@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 use windows::Win32::{
     Foundation::HANDLE,
     System::Console::{
-        GetConsoleScreenBufferInfo, GetStdHandle, ReadConsoleOutputCharacterA,
+        GetConsoleScreenBufferInfo, GetStdHandle, ReadConsoleOutputA, CHAR_INFO,
         CONSOLE_SCREEN_BUFFER_INFO, COORD, STD_OUTPUT_HANDLE,
     },
 };
@@ -15,9 +15,8 @@ use crate::{
 
 pub struct ScreenBuffer {
     std_out: HANDLE,
-    buffer: Vec<u8>,
+    buffer: Vec<CHAR_INFO>,
     content: String,
-    y: usize,
 }
 
 impl ScreenBuffer {
@@ -27,46 +26,43 @@ impl ScreenBuffer {
             std_out,
             buffer: Vec::new(),
             content: String::new(),
-            y: get_screen_info(std_out)?.dwCursorPosition.Y as _,
         })
-    }
-
-    pub fn reset_current_pos(&mut self) -> Result<()> {
-        self.y = get_screen_info(self.std_out)?.dwCursorPosition.Y as _;
-        Ok(())
     }
 
     pub fn refresh(&mut self) -> Result<()> {
         let screen = get_screen_info(self.std_out)?;
-        let start_point = COORD {
-            X: 0,
-            Y: self.y as _,
-        };
-        let length = (screen.dwSize.X as usize + 2) * (screen.dwSize.Y as usize + 2);
+        let length = screen.dwSize.X as usize * screen.dwSize.Y as usize;
         if self.buffer.len() < length {
-            self.buffer.resize(length, 0);
+            self.buffer.resize(length, Default::default());
         }
-        let mut read_bytes = 0;
+        let mut window = screen.srWindow;
         let result = unsafe {
-            ReadConsoleOutputCharacterA(
+            ReadConsoleOutputA(
                 self.std_out,
-                &mut self.buffer,
-                start_point,
-                &mut read_bytes,
+                self.buffer.as_mut_ptr(),
+                screen.dwSize,
+                COORD { X: 0, Y: 0 },
+                &mut window,
             )
         };
         if !result.as_bool() {
             return Err(last_os_error("Failed to read console output"));
         };
-        let content: String = self.buffer[..read_bytes as _]
+        let content = self
+            .buffer
             .chunks(screen.dwSize.X as _)
             .map(|line| {
-                Into::<String>::into(String::from_utf8_lossy(line))
-                    .trim()
-                    .to_owned()
-                    + "\n"
+                let line = line
+                    .iter()
+                    .map(|c| unsafe { c.Char.AsciiChar.0 })
+                    .skip_while(|c| *c == 0)
+                    .take_while(|c| *c != 0)
+                    .collect::<Vec<_>>();
+                String::from_utf8_lossy(&line).trim().to_owned() + "\n"
             })
-            .collect();
+            .collect::<String>()
+            .trim()
+            .to_string();
         self.content = content.trim().to_string();
 
         Ok(())
